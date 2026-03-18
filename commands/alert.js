@@ -1,11 +1,8 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { api } from '../api.js';
 
-// { userId -> [{ warId, side, channelId, userId }] }
 const userAlerts = new Map();
 const watcherIntervals = new Map();
-
-// Tracks wars where alert was already sent — key: `${userId}:${warId}`
 const sentAlerts = new Set();
 
 function normalizeArray(data) {
@@ -22,7 +19,6 @@ async function getWarScores(warId) {
   const war = normalizeArray(rawWar)[0];
   const rounds = normalizeArray(rawRounds);
 
-  // Use only the current active round's score
   const currentRound = rounds.find((r) => r.id === war?.current_round_id) ?? null;
   const totalAtk = Number(currentRound?.attackers_score ?? 0);
   const totalDef = Number(currentRound?.defenders_score ?? 0);
@@ -30,16 +26,15 @@ async function getWarScores(warId) {
   return { war, totalAtk, totalDef, currentRound };
 }
 
-async function checkAlert(client, userId, warId, side, channelId) {
+async function checkAlert(client, userId, warId, side) {
   try {
+    const channelId = process.env.BOT_CHANNEL_ID;
     const { war, totalAtk, totalDef } = await getWarScores(warId);
     const alertKey = `${userId}:${warId}`;
 
     if (!war) {
       const channel = await client.channels.fetch(channelId);
-      await channel.send(
-        `<@${userId}> ⚠️ War **#${warId}** no longer exists or has ended. Alert removed.`
-      );
+      await channel.send(`<@${userId}> ⚠️ War **#${warId}** no longer exists or has ended. Alert removed.`);
       sentAlerts.delete(alertKey);
       removeAlert(userId, warId);
       return;
@@ -52,9 +47,7 @@ async function checkAlert(client, userId, warId, side, channelId) {
 
     if (!isAttacker && !isDefender) {
       const channel = await client.channels.fetch(channelId);
-      await channel.send(
-        `<@${userId}> ⚠️ Country **${side}** is not in war **#${warId}**. Alert removed.`
-      );
+      await channel.send(`<@${userId}> ⚠️ Country **${side}** is not in war **#${warId}**. Alert removed.`);
       sentAlerts.delete(alertKey);
       removeAlert(userId, warId);
       return;
@@ -65,7 +58,6 @@ async function checkAlert(client, userId, warId, side, channelId) {
     const enemyName = isAttacker ? defenderName : attackerName;
 
     if (enemyScore > userScore) {
-      // Enemy is winning — only ping if we haven't already alerted for this war
       if (sentAlerts.has(alertKey)) return;
 
       sentAlerts.add(alertKey);
@@ -95,14 +87,10 @@ async function checkAlert(client, userId, warId, side, channelId) {
         ],
       });
     } else {
-      // User's side is winning or tied — reset alert so it can fire again if they fall behind
       if (sentAlerts.has(alertKey)) {
         sentAlerts.delete(alertKey);
-
         const channel = await client.channels.fetch(channelId);
-        await channel.send(
-          `<@${userId}> ✅ **${side} has taken the lead in war #${warId}!** Resuming monitoring.`
-        );
+        await channel.send(`<@${userId}> ✅ **${side} has taken the lead in war #${warId}!** Resuming monitoring.`);
       }
     }
   } catch (err) {
@@ -134,15 +122,13 @@ function startWatcher(client, warId) {
   const interval = setInterval(async () => {
     const allAlerts = [...userAlerts.values()].flat().filter((a) => a.warId === warId);
     for (const alert of allAlerts) {
-      await checkAlert(client, alert.userId, alert.warId, alert.side, alert.channelId);
+      await checkAlert(client, alert.userId, alert.warId, alert.side);
     }
   }, 60_000);
 
   watcherIntervals.set(warId, interval);
   console.log(`👀 Started watcher for war #${warId}`);
 }
-
-// ── Command definition ─────────────────────────────────────────────────────
 
 export const data = new SlashCommandBuilder()
   .setName('alert')
@@ -170,17 +156,13 @@ export const data = new SlashCommandBuilder()
     sub.setName('list').setDescription('Show all your active alerts')
   );
 
-// ── Execute ────────────────────────────────────────────────────────────────
-
 export async function execute(interaction) {
   await interaction.deferReply({ ephemeral: true });
   const sub = interaction.options.getSubcommand();
   const userId = interaction.user.id;
-  const channelId = interaction.channelId;
   const client = interaction.client;
 
   try {
-    // ── /alert set ──────────────────────────────────────────────────────
     if (sub === 'set') {
       const warId = interaction.options.getInteger('war_id');
       const side = interaction.options.getString('side');
@@ -209,11 +191,10 @@ export async function execute(interaction) {
         return interaction.editReply(`⚠️ You already have an alert for war #${warId}. Use \`/alert stop\` first.`);
       }
 
-      userAlerts.set(userId, [...existing, { warId, side: normalizedSide, channelId, userId }]);
+      userAlerts.set(userId, [...existing, { warId, side: normalizedSide, userId }]);
       startWatcher(client, warId);
 
-      // Run an immediate check
-      await checkAlert(client, userId, warId, normalizedSide, channelId);
+      await checkAlert(client, userId, warId, normalizedSide);
 
       return interaction.editReply({
         embeds: [
@@ -225,13 +206,12 @@ export async function execute(interaction) {
               { name: '🏳️ Your Side', value: normalizedSide, inline: true },
               { name: '⏱️ Check Interval', value: 'Every 60 seconds', inline: true },
             )
-            .setDescription(`You'll be pinged in <#${channelId}> if **${normalizedSide}** falls behind.`)
+            .setDescription(`You'll be pinged in <#${process.env.BOT_CHANNEL_ID}> if **${normalizedSide}** falls behind.`)
             .setFooter({ text: 'Use /alert stop war_id to cancel' }),
         ],
       });
     }
 
-    // ── /alert stop ─────────────────────────────────────────────────────
     if (sub === 'stop') {
       const warId = interaction.options.getInteger('war_id');
       const alerts = userAlerts.get(userId) ?? [];
@@ -246,7 +226,6 @@ export async function execute(interaction) {
       return interaction.editReply(`✅ Alert for war **#${warId}** removed.`);
     }
 
-    // ── /alert list ─────────────────────────────────────────────────────
     if (sub === 'list') {
       const alerts = userAlerts.get(userId) ?? [];
 
@@ -264,7 +243,7 @@ export async function execute(interaction) {
         const status = sentAlerts.has(alertKey) ? '🔴 Enemy leading — waiting for comeback' : '🟢 Monitoring';
         embed.addFields({
           name: `War #${alert.warId}`,
-          value: `🏳️ Watching: **${alert.side}**\n📢 Channel: <#${alert.channelId}>\n${status}`,
+          value: `🏳️ Watching: **${alert.side}**\n${status}`,
           inline: true,
         });
       }

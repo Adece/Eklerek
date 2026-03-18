@@ -1,10 +1,10 @@
 import 'dotenv/config';
 import { Client, GatewayIntentBits, Collection, Events } from 'discord.js';
-import { startWarWatcher } from './warWatcher.js';
 import { readdirSync } from 'fs';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { dirname, join } from 'path';
-
+import { startWarWatcher } from './warWatcher.js';
+import { startCentralismWatcher } from './centralismWatcher.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -33,6 +33,7 @@ client.once(Events.ClientReady, (c) => {
   console.log(`\n🤖 Logged in as ${c.user.tag}`);
   console.log(`📡 Serving ${c.guilds.cache.size} server(s)`);
   startWarWatcher(client);
+  startCentralismWatcher(client);
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
