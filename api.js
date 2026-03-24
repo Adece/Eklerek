@@ -22,6 +22,7 @@ export const api = {
   myEquipments: (page = 1) => apiFetch(`/account/mine/equipments?page=${page}`),
   countryStats: (statistic) => apiFetch(`/statistics/country?statistic=${statistic}`),
   countries: () => apiFetch('/countries'),
+  auctions: (finished = 0, page = 1) => apiFetch(`/market/auctions/get?finished=${finished}&page=${page}`),
   wars: ({ event_wars = 0, extra_details = 0, expired = 0, war_id = 0, page = 1 } = {}) =>
     apiFetch(`/wars?event_wars=${event_wars}&extra_details=${extra_details}&expired=${expired}&war_id=${war_id}&page=${page}`),
   warRounds: (war_id) => apiFetch(`/war/rounds?war_id=${war_id}`),
