@@ -6,6 +6,7 @@ import { dirname, join } from 'path';
 import { startWarWatcher } from './warWatcher.js';
 import { startCentralismWatcher } from './centralismWatcher.js';
 import { startAuctionWatcher } from './auctionWatcher.js';
+import { startFoodWatcher } from './foodWatcher.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -36,6 +37,7 @@ client.once(Events.ClientReady, (c) => {
   startWarWatcher(client);
   startCentralismWatcher(client);
   startAuctionWatcher(client);
+  startFoodWatcher(client);
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
