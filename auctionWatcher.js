@@ -2,11 +2,11 @@ import 'dotenv/config';
 import { EmbedBuilder } from 'discord.js';
 import { api } from './api.js';
 
-const INTERVAL_MS = 5 * 60 * 1000;       // check auctions every 5 minutes
-const EQUIPMENT_REFRESH_MS = 60 * 60 * 1000; // refresh equipment list every hour
+const INTERVAL_MS = 5 * 60 * 1000;
+const EQUIPMENT_REFRESH_MS = 60 * 60 * 1000;
 
 const announcedAuctionIds = new Set();
-let highGradeEquipmentIds = new Set();
+let highGradeEquipmentIds = new Map(); // id -> { grade, ...stats }
 
 function normalizeArray(data) {
   if (Array.isArray(data)) return data;
@@ -14,12 +14,44 @@ function normalizeArray(data) {
   return [];
 }
 
-// ── Fetch all equipment pages and build a Set of grade 4/5 IDs ────────────
+// Stat fields to display (skips avatar, id, drop_category)
+const STAT_LABELS = {
+  slot: 'Slot',
+  critical_chance: 'Critical Chance',
+  critical_hit: 'Critical Hit',
+  damage_percentage: 'Damage %',
+  true_damage: 'True Damage',
+  flatland_damage_percentage: 'Flatland Damage %',
+  mountains_damage_percentage: 'Mountains Damage %',
+  forest_damage_percentage: 'Forest Damage %',
+  desert_damage_percentage: 'Desert Damage %',
+  accuracy: 'Accuracy',
+  drop_chance: 'Drop Chance',
+  construction_percentage: 'Construction %',
+  hospital_construction_percentage: 'Hospital Construction %',
+  militarybase_construction_percentage: 'Military Base Construction %',
+  productionfields_construction_percentage: 'Production Fields Construction %',
+  industrialzone_construction_percentage: 'Industrial Zone Construction %',
+  construction_item_donation_percentage: 'Construction Item Donation %',
+  mining_gold_percentage: 'Mining Gold %',
+  construction_energy_reduction_percentage: 'Construction Energy Reduction %',
+};
+
+function buildStatsText(equipment) {
+  const lines = [];
+  for (const [key, label] of Object.entries(STAT_LABELS)) {
+    const value = equipment[key];
+    if (value !== undefined && value !== null && value !== 0) {
+      lines.push(`• **${label}:** ${value}`);
+    }
+  }
+  return lines.length ? lines.join('\n') : 'No notable stats.';
+}
 
 async function buildEquipmentIndex() {
   console.log('🔧 Building equipment index (grade 4 & 5)...');
-  const found = new Set();
   let page = 1;
+  const fresh = new Map();
 
   while (true) {
     try {
@@ -30,11 +62,10 @@ async function buildEquipmentIndex() {
 
       for (const item of items) {
         if (item.grade >= 4) {
-          found.add(item.id);
+          fresh.set(item.id, item); // store full item object
         }
       }
 
-      // If we got a full page, there might be more
       if (items.length < 10) break;
       page++;
     } catch (err) {
@@ -43,11 +74,9 @@ async function buildEquipmentIndex() {
     }
   }
 
-  highGradeEquipmentIds = found;
-  console.log(`✅ Equipment index built — ${found.size} high-grade items found (grade 4+)`);
+  highGradeEquipmentIds = fresh;
+  console.log(`✅ Equipment index built — ${fresh.size} high-grade items (grade 4+)`);
 }
-
-// ── Check auctions ─────────────────────────────────────────────────────────
 
 async function checkAuctions(client) {
   const channelId = process.env.BOT_CHANNEL_ID;
@@ -75,19 +104,15 @@ async function checkAuctions(client) {
       const channel = await client.channels.fetch(channelId);
 
       for (const auction of auctions) {
-        // Only care about equipment type
         if (auction.item.type !== 'equipment') continue;
-
-        // Check if it's a high grade equipment
         if (!highGradeEquipmentIds.has(auction.item.id)) continue;
-
-        // Already announced
         if (announcedAuctionIds.has(auction.id)) continue;
 
         announcedAuctionIds.add(auction.id);
 
-        // Figure out grade for display
-        const grade = getGradeLabel(auction.item.id);
+        const equipment = highGradeEquipmentIds.get(auction.item.id);
+        const grade = equipment.grade === 5 ? 'Q5' : 'Q4';
+        const statsText = buildStatsText(equipment);
 
         await channel.send({
           content: `<@&${roleId}> 🔨 **High-grade equipment auction detected!**`,
@@ -99,9 +124,10 @@ async function checkAuctions(client) {
                 { name: '🆔 Auction ID', value: `#${auction.id}`, inline: true },
                 { name: '⚙️ Equipment ID', value: `#${auction.item.id}`, inline: true },
                 { name: '🏅 Grade', value: grade, inline: true },
-                { name: '💰 Starting Bid', value: `${auction.initial_bid.toLocaleString()}`, inline: true },
+                { name: '💰 Starting Bid', value: auction.initial_bid.toLocaleString(), inline: true },
                 { name: '⏰ Ends At', value: `\`${auction.end_at}\``, inline: true },
-                { name: '📅 Created At', value: `\`${auction.created_at}\``, inline: true },
+                { name: '📦 Drop Category', value: equipment.drop_category ?? 'Unknown', inline: true },
+                { name: '📊 Stats', value: statsText },
               )
               .setFooter({ text: 'Eclesiar Bot • Auction Watcher' })
               .setTimestamp(),
@@ -119,74 +145,14 @@ async function checkAuctions(client) {
   }
 }
 
-// Helper to get Q4/Q5 label from the equipment index
-function getGradeLabel(equipmentId) {
-  // We stored IDs but not grades — we need a map instead
-  // This is handled by upgrading highGradeEquipmentIds to a Map below
-  const grade = highGradeEquipmentIds.get ? highGradeEquipmentIds.get(equipmentId) : null;
-  if (grade === 5) return 'Q5';
-  if (grade === 4) return 'Q4';
-  return 'Q4+';
-}
-
-// ── Start ──────────────────────────────────────────────────────────────────
-
 export async function startAuctionWatcher(client) {
-  // Use a Map instead of Set so we can store grade alongside ID
-  highGradeEquipmentIds = new Map();
+  await buildEquipmentIndex();
 
-  // Override buildEquipmentIndex to use Map
-  console.log('🔧 Building equipment index (grade 4 & 5)...');
-  let page = 1;
-
-  while (true) {
-    try {
-      const raw = await api.serverEquipments(page);
-      const items = normalizeArray(raw);
-
-      if (!items.length) break;
-
-      for (const item of items) {
-        if (item.grade >= 4) {
-          highGradeEquipmentIds.set(item.id, item.grade);
-        }
-      }
-
-      if (items.length < 10) break;
-      page++;
-    } catch (err) {
-      console.error(`Equipment index error on page ${page}:`, err.message);
-      break;
-    }
-  }
-
-  console.log(`✅ Equipment index built — ${highGradeEquipmentIds.size} high-grade items (grade 4+)`);
-
-  // Refresh equipment index every hour
   setInterval(async () => {
     console.log('🔄 Refreshing equipment index...');
-    let p = 1;
-    const fresh = new Map();
-    while (true) {
-      try {
-        const raw = await api.serverEquipments(p);
-        const items = normalizeArray(raw);
-        if (!items.length) break;
-        for (const item of items) {
-          if (item.grade >= 4) fresh.set(item.id, item.grade);
-        }
-        if (items.length < 10) break;
-        p++;
-      } catch (err) {
-        console.error(`Equipment refresh error on page ${p}:`, err.message);
-        break;
-      }
-    }
-    highGradeEquipmentIds = fresh;
-    console.log(`✅ Equipment index refreshed — ${fresh.size} high-grade items`);
+    await buildEquipmentIndex();
   }, EQUIPMENT_REFRESH_MS);
 
-  // Start auction polling
   console.log('🔨 Auction watcher started — checking every 5 minutes');
   checkAuctions(client);
   setInterval(() => checkAuctions(client), INTERVAL_MS);
