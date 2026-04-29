@@ -7,8 +7,8 @@ const COUNTRY_ID = 45;
 const TRUSTED_OWNER_IDS = new Set([150, 676]);
 const ITEMS = [
   { id: 1, label: 'Grain' },
-  { id: 2, label: 'Food Q2' },
-  { id: 3, label: 'Food Q3' },
+  { id: 3, label: 'Food Q2' },
+  { id: 4, label: 'Food Q3' },
   { id: 7, label: 'Iron' },
   { id: 13, label: 'Fuel' },
   { id: 19, label: 'Titanium' },
