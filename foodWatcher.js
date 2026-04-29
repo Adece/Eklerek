@@ -2,15 +2,18 @@ import 'dotenv/config';
 import { EmbedBuilder } from 'discord.js';
 import { api } from './api.js';
 
-const INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
-const COUNTRY_ID = 45; // South Korea
+const INTERVAL_MS = 5 * 60 * 1000;
+const COUNTRY_ID = 45;
 const TRUSTED_OWNER_IDS = new Set([150, 676]);
 const ITEMS = [
+  { id: 1, label: 'Grain' },
   { id: 2, label: 'Food Q2' },
   { id: 3, label: 'Food Q3' },
+  { id: 7, label: 'Iron' },
+  { id: 13, label: 'Fuel' },
+  { id: 19, label: 'Titanium' },
 ];
 
-// Tracks which items have already been alerted — resets when trusted owner takes back the lowest offer
 const alertedItems = new Set();
 
 function normalizeArray(data) {
@@ -37,7 +40,6 @@ async function checkFood(client) {
 
       if (!offers.length) continue;
 
-      // Sort by value ascending to find the lowest offer
       const sorted = [...offers].sort((a, b) => a.value - b.value);
       const lowest = sorted[0];
       const lowestOwnerId = lowest.owner.id;
@@ -45,12 +47,10 @@ async function checkFood(client) {
       const alertKey = `item:${item.id}`;
 
       if (!isTrusted) {
-        // Untrusted owner has the lowest offer — alert if not already sent
         if (alertedItems.has(alertKey)) continue;
 
         alertedItems.add(alertKey);
 
-        // Build offer list (top 5)
         const offerLines = sorted
           .slice(0, 5)
           .map((o, i) => {
@@ -63,7 +63,7 @@ async function checkFood(client) {
           content: `<@&${roleId}> ⚠️ **${item.label} lowest offer is not from a trusted owner!**`,
           embeds: [
             new EmbedBuilder()
-              .setTitle(`🍞 ${item.label} Market Alert — South Korea`)
+              .setTitle(`🏪 ${item.label} Market Alert — South Korea`)
               .setColor(0xe24b4a)
               .setDescription(`The lowest offer for **${item.label}** is no longer from a trusted owner.`)
               .addFields(
@@ -72,15 +72,14 @@ async function checkFood(client) {
                 { name: '👤 Owner', value: `${lowest.owner.type} #${lowestOwnerId}`, inline: true },
                 { name: '📊 Top 5 Offers', value: offerLines },
               )
-              .setFooter({ text: 'Eclesiar Bot • Food Watcher • ✅ = trusted owner' })
+              .setFooter({ text: 'Eclesiar Bot • Market Watcher • ✅ = trusted owner' })
               .setTimestamp(),
           ],
         });
 
-        console.log(`📢 Food alert sent for ${item.label} — lowest offer by owner #${lowestOwnerId} (untrusted)`);
+        console.log(`📢 Market alert sent for ${item.label} — lowest offer by owner #${lowestOwnerId} (untrusted)`);
 
       } else {
-        // Trusted owner is back on top — reset alert
         if (alertedItems.has(alertKey)) {
           alertedItems.delete(alertKey);
 
@@ -98,7 +97,7 @@ async function checkFood(client) {
 }
 
 export function startFoodWatcher(client) {
-  console.log('🍞 Food watcher started — checking every 5 minutes');
+  console.log('🍞 Market watcher started — checking every 5 minutes');
   checkFood(client);
   setInterval(() => checkFood(client), INTERVAL_MS);
 }
